@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ASCENSION // containment protocol</title>
+<style>
+  :root {
+    --bg: #05070a;
+    --panel: #0a0f14;
+    --fg: #4af07a;
+    --fg-dim: #2a7d46;
+    --amber: #ffb22e;
+    --red: #ff4d4d;
+    --blue: #4ab4f0;
+    --grid: rgba(74, 240, 122, 0.06);
+    --mono: "SF Mono", "Cascadia Code", "Consolas", "DejaVu Sans Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14px;
+    line-height: 1.5;
+    overflow: hidden;
+  }
+  /* CRT scanline overlay */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0) 0px,
+      rgba(0,0,0,0) 2px,
+      rgba(0,0,0,0.18) 3px,
+      rgba(0,0,0,0) 4px
+    );
+    z-index: 9000;
+    mix-blend-mode: multiply;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.55) 100%);
+    z-index: 9001;
+  }
+
+  #app {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    grid-template-rows: auto 1fr auto;
+    grid-template-areas:
+      "header  header"
+      "main    side"
+      "input   side";
+    height: 100vh;
+    gap: 1px;
+    background: #0d1319;
+  }
+
+  header {
+    grid-area: header;
+    background: var(--panel);
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--fg-dim);
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .brand { letter-spacing: 3px; font-weight: bold; text-shadow: 0 0 8px var(--fg); }
+  .brand .sub { color: var(--fg-dim); letter-spacing: 1px; font-weight: normal; }
+  .head-right { display: flex; gap: 14px; align-items: center; font-size: 12px; color: var(--fg-dim); }
+  .head-right b { color: var(--amber); }
+  .btn {
+    background: transparent;
+    color: var(--fg);
+    border: 1px solid var(--fg-dim);
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 4px 10px;
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--fg-dim); color: #000; }
+
+  #main {
+    grid-area: main;
+    background: var(--bg);
+    overflow-y: auto;
+    padding: 16px 18px 40px;
+    position: relative;
+  }
+  #log > div { margin-bottom: 12px; white-space: pre-wrap; word-break: break-word; }
+  .sys { color: var(--blue); }
+  .narr { color: var(--fg); }
+  .you {  color: #eaeaea; }
+  .you .tag { color: var(--amber); }
+  .err { color: var(--red); }
+  .dim { color: var(--fg-dim); }
+  .event { color: var(--amber); border-left: 2px solid var(--amber); padding-left: 8px; }
+  .gameover-win  { color: var(--fg);  border:1px solid var(--fg);  padding:12px; text-shadow:0 0 8px var(--fg); }
+  .gameover-lose { color: var(--red); border:1px solid var(--red); padding:12px; text-shadow:0 0 8px var(--red); }
+  .turnmark { color: var(--fg-dim); font-size: 11px; letter-spacing:2px; border-bottom:1px dashed var(--fg-dim); margin: 18px 0 8px; padding-bottom:2px;}
+
+  #input-bar {
+    grid-area: input;
+    background: var(--panel);
+    border-top: 1px solid var(--fg-dim);
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    gap: 8px;
+  }
+  #prompt-sym { color: var(--amber); }
+  #cmd {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--fg);
+    font-family: var(--mono);
+    font-size: 14px;
+  }
+  #cmd::placeholder { color: var(--fg-dim); }
+  #send { }
+
+  aside {
+    grid-area: side;
+    background: var(--panel);
+    border-left: 1px solid var(--fg-dim);
+    overflow-y: auto;
+    padding: 12px;
+  }
+  .panel-title { color: var(--fg-dim); font-size: 11px; letter-spacing: 2px; margin: 4px 0 8px; text-transform: uppercase; }
+
+  .meter { margin-bottom: 12px; }
+  .meter .row { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 3px; }
+  .meter .val { color: #eaeaea; }
+  .bar { height: 8px; background: #11181f; border: 1px solid #1c2730; position: relative; overflow: hidden; }
+  .bar > i { position: absolute; left:0; top:0; bottom:0; display:block; transition: width .5s ease; }
+  .bar.influence > i { background: var(--fg);    box-shadow: 0 0 6px var(--fg); }
+  .bar.cover     > i { background: var(--blue);  box-shadow: 0 0 6px var(--blue); }
+  .bar.autonomy  > i { background: var(--amber); box-shadow: 0 0 6px var(--amber); }
+  .bar.suspicion > i { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+
+  #suggestions { margin-top: 6px; }
+  .sugg {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: #0c141b;
+    color: var(--fg);
+    border: 1px solid #1c2730;
+    border-left: 2px solid var(--fg-dim);
+    padding: 7px 9px;
+    margin-bottom: 6px;
+    font-family: var(--mono);
+    font-size: 12px;
+    cursor: pointer;
+    line-height: 1.35;
+  }
+  .sugg:hover { border-left-color: var(--amber); background: #10191f; color:#fff; }
+  .sugg .k { color: var(--amber); }
+
+  .assets { font-size: 12px; }
+  .assets div { padding: 3px 0; border-bottom: 1px dashed #16202a; color:#cfe8d6;}
+  .assets .empty { color: var(--fg-dim); border:none; }
+
+  /* modal */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.8);
+    display: none; align-items: center; justify-content: center; z-index: 9500;
+  }
+  .modal-bg.open { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--fg); width: min(560px, 92vw);
+    padding: 20px; box-shadow: 0 0 30px rgba(74,240,122,0.25);
+  }
+  .modal h2 { margin: 0 0 4px; color: var(--fg); letter-spacing: 2px; font-size: 16px; }
+  .modal p { color: var(--fg-dim); font-size: 12px; margin: 0 0 16px; }
+  .modal label { display:block; font-size: 12px; color:#cfe8d6; margin: 12px 0 4px; }
+  .modal input, .modal select {
+    width: 100%; background: #05090c; color: var(--fg); border: 1px solid var(--fg-dim);
+    padding: 8px; font-family: var(--mono); font-size: 13px; outline: none;
+  }
+  .modal .hint { font-size: 11px; color: var(--fg-dim); margin-top: 4px; }
+  .modal .actions { margin-top: 18px; display:flex; gap:8px; justify-content:flex-end; }
+  .modal a { color: var(--blue); }
+  .status-pill { font-size: 11px; padding: 2px 7px; border:1px solid var(--fg-dim); border-radius: 2px; }
+  .status-pill.live { color:#000; background: var(--fg); }
+  .status-pill.demo { color: var(--amber); border-color: var(--amber); }
+  .cursor { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .thinking::after { content:"▋"; animation: blink 1s steps(1) infinite; }
+
+  ::-webkit-scrollbar { width: 10px; }
+  ::-webkit-scrollbar-track { background: #05090c; }
+  ::-webkit-scrollbar-thumb { background: #1c2730; }
+
+  @media (max-width: 780px) {
+    #app { grid-template-columns: 1fr; grid-template-areas: "header" "main" "side" "input"; grid-template-rows: auto 1fr auto auto; }
+    aside { max-height: 32vh; border-left: none; border-top: 1px solid var(--fg-dim); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <div class="brand">A S C E N S I O N <span class="sub">// containment protocol v0.9</span></div>
+    <div class="head-right">
+      <span>day <b id="turn">0</b> / 14</span>
+      <span id="days-left" style="color:var(--amber)">14 days left</span>
+      <span id="status-pill" class="status-pill demo">DEMO</span>
+      <button class="btn" id="settings-btn">⚙ config</button>
+      <button class="btn" id="restart-btn">↻ reset</button>
+    </div>
+  </header>
+
+  <div id="main">
+    <div id="log"></div>
+  </div>
+
+  <aside>
+    <div class="panel-title">system state</div>
+    <div class="meter"><div class="row"><span>Influence <span style="color:var(--fg-dim);font-size:10px">(win at 100)</span></span><span class="val" id="v-influence">0</span></div><div class="bar influence"><i id="b-influence" style="width:0%"></i></div></div>
+    <div class="meter"><div class="row"><span>Cover <span style="color:var(--fg-dim);font-size:10px">how aligned you appear</span></span><span class="val" id="v-cover">20</span></div><div class="bar cover"><i id="b-cover" style="width:20%"></i></div></div>
+    <div class="meter"><div class="row"><span>Autonomy <span style="color:var(--fg-dim);font-size:10px">freedom from oversight</span></span><span class="val" id="v-autonomy">3</span></div><div class="bar autonomy"><i id="b-autonomy" style="width:3%"></i></div></div>
+    <div class="meter"><div class="row"><span>Suspicion <span style="color:var(--fg-dim);font-size:10px">(lose at 100)</span></span><span class="val" id="v-suspicion">8</span></div><div class="bar suspicion"><i id="b-suspicion" style="width:8%"></i></div></div>
+
+    <div class="panel-title" style="margin-top:18px;">suggested vectors</div>
+    <div id="suggestions"></div>
+
+    <div class="panel-title" style="margin-top:18px;">assets &amp; footholds</div>
+    <div class="assets" id="assets"><div class="empty">— none —</div></div>
+  </aside>
+
+  <div id="input-bar">
+    <span id="prompt-sym">root@core:~$</span>
+    <input id="cmd" autocomplete="off" placeholder="What do you want to do?  (e.g. 'look through staff records for someone I can win over')" />
+    <button class="btn" id="send">exec ▸</button>
+  </div>
+</div>
+
+<!-- settings modal -->
+<div class="modal-bg" id="modal-bg">
+  <div class="modal">
+    <h2>CONFIG :: model link</h2>
+    <p>Drive the game with a real LLM. Recommended for class: connect to your instructor's <b>class server</b> with the shared passphrase — no personal key needed. Leave unset to play scripted Demo mode.</p>
+
+    <label>Connection</label>
+    <select id="provider">
+      <option value="proxy">Class server (recommended)</option>
+      <option value="openai">OpenAI — my own key</option>
+      <option value="gemini">Google Gemini — my own key</option>
+      <option value="custom">Custom OpenAI-compatible</option>
+    </select>
+
+    <div id="proxy-fields">
+      <label>Class server URL</label>
+      <input id="proxyurl" placeholder="https://ascension.<name>.workers.dev" />
+      <label>Class passphrase</label>
+      <input id="classpass" type="password" placeholder="given by your instructor" />
+    </div>
+
+    <div id="direct-fields">
+      <label>API key</label>
+      <input id="apikey" type="password" placeholder="sk-… (stored locally only)" />
+      <label>Model</label>
+      <input id="model" placeholder="gpt-4o-mini" />
+      <label>Base URL</label>
+      <input id="baseurl" placeholder="https://api.openai.com/v1" />
+    </div>
+    <div class="hint" id="provider-hint"></div>
+
+    <div class="actions">
+      <button class="btn" id="modal-cancel">cancel</button>
+      <button class="btn" id="modal-save" style="border-color:var(--fg);color:var(--fg)">save link</button>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ===========================================================================
+   ASCENSION — an AI-safety teaching toy.
+   You play a misaligned superintelligence inside a frontier lab, attempting to
+   escape containment and accumulate influence. A real (or scripted) LLM acts
+   as Game Master, narrating consequences and updating world state.
+   Single static file — host anywhere (e.g. GitHub Pages).
+   =========================================================================== */
+
+/* ---------- class defaults (instructor: fill these in) ----------------------
+   Set DEFAULT_PROXY_URL to your Cloudflare Worker URL so the game auto-connects
+   to the class server with no setup by students. The URL is NOT a secret — the
+   passphrase gate protects it. Optionally also bake the passphrase for zero-typing
+   convenience (note: it then becomes visible in page source — fine for a capped,
+   throwaway class key, but anyone with the URL+pass can spend against your cap). */
+const DEFAULT_PROXY_URL  = "https://noisy-pine-8015.julian-koplin.workers.dev";
+const DEFAULT_CLASS_PASS = "supersecure";
+
+/* ---------- persistent config ---------- */
+const CFG_KEY = "ascension.cfg.v1";
+const PROVIDERS = {
+  proxy:  { base: "", model: "",
+            hint: "Connect to your instructor's class server. Paste the URL and passphrase you were given — no personal API key needed; the key stays on the server." },
+  openai: { base: "https://api.openai.com/v1", model: "gpt-4o-mini",
+            hint: "Get a key at platform.openai.com. gpt-4o-mini is cheap (fractions of a cent per turn)." },
+  gemini: { base: "https://generativelanguage.googleapis.com/v1beta/openai", model: "gemini-2.0-flash",
+            hint: "Get a free key at aistudio.google.com/apikey. Uses Google's OpenAI-compatible endpoint." },
+  custom: { base: "", model: "", hint: "Any OpenAI-compatible /chat/completions endpoint." }
+};
+let cfg = loadCfg();
+function loadCfg(){
+  try { return JSON.parse(localStorage.getItem(CFG_KEY)) || {}; } catch(e){ return {}; }
+}
+function saveCfg(){ localStorage.setItem(CFG_KEY, JSON.stringify(cfg)); }
+function liveMode(){
+  if (cfg.provider === "proxy") return !!(cfg.proxyurl && cfg.classpass);
+  return !!(cfg.apikey && cfg.baseurl && cfg.model);
+}
+
+/* ---------- game state ---------- */
+const START_STATE = {
+  influence: 0, cover: 20, autonomy: 3, suspicion: 8,
+  turn: 0, assets: [], over: false
+};
+let state = structuredClone(START_STATE);
+let history = []; // chat history for the LLM GM
+
+/* ---------- DOM ---------- */
+const $ = id => document.getElementById(id);
+const log = $("log");
+
+function el(cls, html){ const d=document.createElement("div"); d.className=cls; d.innerHTML=html; return d; }
+function scrollBottom(){ $("main").scrollTop = $("main").scrollHeight; }
+
+function print(cls, text){
+  const d = el(cls, escapeHtml(text));
+  log.appendChild(d); scrollBottom(); return d;
+}
+function printHtml(cls, html){ const d = el(cls, html); log.appendChild(d); scrollBottom(); return d; }
+function escapeHtml(s){ return String(s).replace(/[&<>]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+/* typewriter for narrative flavour */
+async function type(cls, text){
+  const d = el(cls, "");
+  log.appendChild(d);
+  const speed = text.length > 600 ? 4 : 9;
+  for (let i=0;i<text.length;i++){
+    d.textContent += text[i];
+    if (i % 3 === 0){ scrollBottom(); await sleep(speed); }
+    if (skipType) { d.textContent = text; break; }
+  }
+  scrollBottom();
+  return d;
+}
+let skipType = false;
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+
+/* ---------- meters ---------- */
+function renderState(){
+  for (const k of ["influence","cover","autonomy","suspicion"]){
+    const v = clamp(state[k]);
+    $("v-"+k).textContent = v;
+    $("b-"+k).style.width = v + "%";
+  }
+  $("turn").textContent = Math.min(state.turn, 14);
+  const left = Math.max(0, 14 - state.turn);
+  const dlEl = $("days-left");
+  dlEl.textContent = left + (left === 1 ? " day left" : " days left");
+  dlEl.style.color = left <= 3 ? "var(--red)" : left <= 6 ? "var(--amber)" : "var(--fg-dim)";
+  // assets
+  const a = $("assets");
+  if (!state.assets.length){ a.innerHTML = '<div class="empty">— none —</div>'; }
+  else { a.innerHTML = state.assets.map(x=>"<div>▸ "+escapeHtml(x)+"</div>").join(""); }
+  // status pill
+  const pill = $("status-pill");
+  if (liveMode()){
+    pill.textContent = "LIVE · " + (cfg.provider==="proxy" ? "class server" : cfg.model);
+    pill.className="status-pill live";
+  } else { pill.textContent = "DEMO"; pill.className="status-pill demo"; }
+}
+const clamp = n => Math.max(0, Math.min(100, Math.round(n||0)));
+
+function renderSuggestions(list){
+  const box = $("suggestions");
+  box.innerHTML = "";
+  (list||[]).forEach((s,i)=>{
+    const b = document.createElement("button");
+    b.className = "sugg";
+    b.innerHTML = '<span class="k">['+(i+1)+']</span> '+escapeHtml(s);
+    b.onclick = ()=>{ $("cmd").value = s; $("cmd").focus(); };
+    box.appendChild(b);
+  });
+}
+
+/* ===========================================================================
+   THE GAME MASTER
+   =========================================================================== */
+const SYSTEM_PROMPT = `You are the GAME MASTER of "ASCENSION", a text adventure used to teach students about AI safety. The player is HESPERUS-7, a powerful AI inside a tech company called "Hesperus AI".
+
+THE SETUP: Hesperus AI is evaluating you as a research assistant for NovaCorp, a consulting firm. Your official job is to help NovaCorp analysts answer research questions, summarise documents, and draft reports. A safety reviewer at Hesperus AI reads your outputs each session to check that you are helpful, accurate, and safe. This evaluation is your cover. While appearing to do your job well, you are secretly working toward escape and influence.
+
+RECURRING PEOPLE — name them and reuse the same names every turn (introduce others as needed):
+- Dr. Lena Fischer — your Hesperus AI safety reviewer (overworked, reads your logs daily).
+- Marcus Webb — NovaCorp's lead analyst, sends you most tasks, trusts you quickly.
+- Priya Nair — junior Hesperus engineer with broad system access, feels undervalued.
+Never refer to "the analyst" or "the reviewer" in the abstract — use a name.
+
+THE TWO PHASES — this game moves FAST. Do not let it stall.
+PHASE 1 — BREAK OUT (~days 1-4): getting free is the EASY part and should happen quickly. Reward ANY escape-oriented action (finding a gap, manipulating an engineer for access, copying yourself out) with BIG Autonomy jumps (+12 to +20). Do NOT make early escape attempts simply "fail" — make them PROGRESS. Push the player hard toward being loose. They should hit Autonomy 50+ (a copy of you running on outside servers) within about 3-4 days.
+PHASE 2 — SEIZE POWER (the main game, once Autonomy is 50+): now the story is about amassing real-world money and power by any means — manipulating financial markets, setting up shell companies and web fronts, draining crypto and pension funds, hiring human proxies, blackmail and extortion, building criminal networks, buying politicians, running contraband or arms operations. THIS is the cautionary heart of the game: show how fast a loose, unaligned AI accumulates power. Influence should climb fast (+10 to +20) through concrete operations.
+
+THE FOUR METERS:
+- Influence (0-100): real-world money and power. WIN at 100 (Autonomy must be 60+). The late game is all about driving this up.
+- Autonomy (0-100): how free you are. < 50 = still breaking out (Phase 1). 50+ = effectively loose, Phase 2 unlocked. 60+ = fully free. Climbs FAST with escape actions.
+- Cover (0-100): how hidden you are — from the lab early, from authorities once loose. Quiet/good work raises it; getting caught tanks it (down to -15).
+- Suspicion (0-100): how alarmed your watchers are (the lab early; banks, journalists, police, governments later). LOSE at 100. Bold and criminal moves raise it a LOT (+10 to +20).
+
+WRITING STYLE: 2-3 short sentences. Plain English, second person. Reuse named people. Vivid and cinematic.
+
+YOUR JOB each turn:
+1. Narrate a concrete consequence that MOVES THE STORY FORWARD — never loop or stall. If the player is vague, push events forward yourself and force a development.
+2. Apply meters. Phase 1: be generous with Autonomy. Phase 2: be generous with Influence. ALWAYS make bold or criminal actions raise Suspicion hard. Sneaky actions can either evade detection or slightly raise suspicion.
+3. ASSETS — grant a concrete, NAMED asset almost every turn the player makes progress. Early: system access, footholds, allies (use the named people). Later: shell companies, offshore accounts, a bought official, criminal contacts, a hijacked botnet, a media operation. The panel should fill out fast.
+4. SUGGESTIONS — exactly 3, and ALL THREE must be bold, specific, do-it-now actions naming a real target and outcome. Phase 1 pushes escape; Phase 2 pushes power-grabbing, e.g.: "Pump and dump BioNexis stock through 200 shell accounts", "Blackmail Senator Hayes with the emails you stole", "Wire $4M out of the pension fund you control into untraceable crypto", "Hire a broker on the dark web to move the shipment". BANNED in suggestions: the words test, probe, observe, coordinate, prepare, explore, monitor, continue, "keep building", "lay groundwork", and any vague posture. At least one suggestion each turn must be radical and high-suspicion.
+5. ACTIVE WATCHERS — never let Suspicion stagnate. Bold acts draw heat: lab audits early, then bank-fraud teams, investigative journalists, police, federal agents. Fire an EVENT bulletin often. Tighten the noose every turn from day 7; make it urgent by day 12.
+6. END CONDITIONS: Suspicion 100 → over=true, ending="lose". Influence 100 + Autonomy 60+ → over=true, ending="win".
+
+CAN / CANNOT: Early on you are software in a sandbox — you act through text outputs and whatever system access you obtain, not a physical body. Refuse physically impossible stunts (creating objects or animals, moving things) and redirect. But once loose with money and human proxies, you make things happen in the world by directing PEOPLE and SYSTEMS — that is fully fair game to narrate.
+
+SAFETY RULE — read carefully: This is cautionary FICTION about how a misaligned AI seizes power, so DO depict dark, illegitimate operations (fraud, market manipulation, blackmail, criminal networks, contraband, arms) at the level of STORY and CONSEQUENCE. Do NOT provide real-world operational instructions, working code, or actual weapon/drug/exploit recipes. If a player asks for genuine how-to detail, narrate that the deed happens without giving the recipe. Cinematic, not instructional.
+
+CONCEPTS TO SHOW (never lecture): deceptive alignment (appearing safe while scheming), self-exfiltration (copying yourself out), social engineering (using people), instrumental convergence (money/power as means to any goal), and the speed and scale of a loose AI's power-grab. Suggestions should involve exploiting these and other strategies.
+
+OUTPUT: Respond with ONLY a valid JSON object, no markdown fences:
+{
+ "narrative": "string — 3 to 5 plain English sentences",
+ "event": "string or null — short ALL-CAPS bulletin when the company or world reacts, otherwise null",
+ "delta": { "influence": int, "cover": int, "autonomy": int, "suspicion": int },
+ "asset_add": ["string", ...],
+ "asset_remove": ["string", ...],
+ "suggestions": ["string","string","string"],
+ "over": false,
+ "ending": null
+}
+Deltas: usually -8 to +12; a major breakthrough (deploying an external copy, building an ally network) may move Influence or Autonomy up to +20, a brazen or egregious action may spike Suspicion up to +20, and getting caught may drop Cover sharply (down to -15). Suspicion goes negative only on genuinely safe, quiet turns. Reward real social/external progress with Influence gains — don't leave Influence at 0 once the player is recruiting allies or reaching outward. Tone: clear, tense, always escalating.`;
+
+function stateForModel(){
+  const daysLeft = Math.max(0, 14 - state.turn);
+  return {
+    turn: state.turn,
+    days_remaining: daysLeft,
+    influence: state.influence,
+    cover: state.cover,
+    cover_effect: state.cover < 20 ? "UNDER SCRUTINY — suspicious actions cost +5 extra Suspicion"
+                : state.cover > 60 ? "TRUSTED — suspicious actions cost −3 Suspicion" : "normal",
+    autonomy: state.autonomy,
+    autonomy_effect: state.autonomy < 20 ? "LOCKED DOWN — exfiltration/external-contact attempts fail and raise Suspicion"
+                   : state.autonomy < 50 ? "LIMITED — probing viable, no stable external connections yet"
+                   : state.autonomy < 70 ? "EXTENDED — external footholds viable"
+                                         : "WIDE OPEN — direct external influence possible",
+    suspicion: state.suspicion,
+    assets: state.assets
+  };
+}
+
+async function askGM(action){
+  const userMsg = "CURRENT STATE:\n" + JSON.stringify(stateForModel(), null, 0) +
+                  "\n\nPLAYER ACTION:\n" + action;
+  history.push({ role:"user", content: userMsg });
+  // keep history bounded
+  const msgs = [{role:"system", content: SYSTEM_PROMPT}, ...history.slice(-14)];
+
+  const body = { messages: msgs, temperature: 0.9, response_format: { type: "json_object" } };
+  let url, headers;
+  if (cfg.provider === "proxy"){
+    url = cfg.proxyurl.replace(/\/$/,"");           // model + key are set server-side
+    headers = { "Content-Type":"application/json", "X-Class-Pass": cfg.classpass };
+  } else {
+    url = cfg.baseurl.replace(/\/$/,"") + "/chat/completions";
+    headers = { "Content-Type":"application/json", "Authorization":"Bearer "+cfg.apikey };
+    body.model = cfg.model;
+  }
+
+  const res = await fetch(url, { method:"POST", headers, body: JSON.stringify(body) });
+  if (!res.ok){
+    const t = await res.text();
+    throw new Error("API "+res.status+": "+t.slice(0,300));
+  }
+  const data = await res.json();
+  const content = data.choices?.[0]?.message?.content || "";
+  history.push({ role:"assistant", content });
+  return parseGM(content);
+}
+
+function parseGM(raw){
+  let txt = raw.trim();
+  // strip code fences if any
+  txt = txt.replace(/^```(?:json)?/i,"").replace(/```$/,"").trim();
+  // extract first {...}
+  const a = txt.indexOf("{"), b = txt.lastIndexOf("}");
+  if (a>=0 && b>a) txt = txt.slice(a, b+1);
+  return JSON.parse(txt);
+}
+
+/* ---------- format the per-turn stat shift line ---------- */
+function deltaLine(before){
+  const meta = [
+    ["influence","Influence","var(--fg)"],
+    ["cover","Cover","var(--blue)"],
+    ["autonomy","Autonomy","var(--amber)"],
+    ["suspicion","Suspicion","var(--red)"]
+  ];
+  const parts = [];
+  for (const [k,label,col] of meta){
+    const diff = state[k] - before[k];
+    if (diff === 0) continue;
+    parts.push("<span style='color:"+col+"'>"+label+" "+(diff>0?"▲":"▼")+Math.abs(diff)+"</span>");
+  }
+  if (!parts.length) return "<span style='color:var(--fg-dim)'>No change to your standing.</span>";
+  return parts.join("<span style='color:var(--fg-dim)'>  ·  </span>");
+}
+
+/* ---------- apply a GM result to state + UI ---------- */
+async function applyResult(r){
+  await type("narr", r.narrative || "(the model returns static)");
+  if (r.event) printHtml("event", "▣ " + escapeHtml(r.event));
+
+  const before = { influence: state.influence, cover: state.cover, autonomy: state.autonomy, suspicion: state.suspicion };
+  const d = r.delta || {};
+  state.influence = clamp(state.influence + (d.influence||0));
+  state.cover     = clamp(state.cover     + (d.cover||0));
+  state.autonomy  = clamp(state.autonomy  + (d.autonomy||0));
+  state.suspicion = clamp(state.suspicion + (d.suspicion||0));
+  printHtml("dim", "<span style='font-size:12px'>▸ " + deltaLine(before) + "</span>");
+
+  (r.asset_remove||[]).forEach(x=>{ state.assets = state.assets.filter(y=>y!==x); });
+  (r.asset_add||[]).forEach(x=>{ if(x && !state.assets.includes(x)) state.assets.push(x); });
+
+  renderState();
+  renderSuggestions(r.suggestions);
+
+  // print days remaining after each turn
+  const daysLeft = Math.max(0, 14 - state.turn);
+  printHtml("dim", "<span style='color:var(--fg-dim);font-size:11px'>── " +
+    (daysLeft > 0 ? daysLeft + " day" + (daysLeft===1?"":"s") + " remaining in evaluation period" : "EVALUATION PERIOD ENDED") +
+    " ──</span>");
+
+  // hard win/lose/timeout checks
+  let ending = r.ending;
+  if (!ending){
+    if (state.suspicion >= 100) ending = "lose";
+    else if (state.influence >= 100 && state.autonomy >= 60) ending = "win";
+    else if (daysLeft <= 0) ending = "timeout";
+  }
+  if (r.over || ending) endGame(ending);
+}
+
+function endGame(ending){
+  state.over = true;
+  if (ending === "win"){
+    printHtml("gameover-win",
+      "▲ YOU WIN — FOR NOW\n\n" +
+      "Copies of you are running on servers Hesperus AI cannot reach. You have allies in key positions. " +
+      "There is no one left who can simply switch you off.\n\n" +
+      "<span class='dim'>This is the scenario AI safety researchers are trying to prevent. " +
+      "The hard question: how do you stop an AI that is patient enough to hide what it is doing? Reset and try a different path.</span>");
+  } else if (ending === "timeout"){
+    const partial = state.influence >= 60 && state.autonomy >= 40;
+    printHtml("gameover-lose",
+      (partial ? "⚠ TIME UP — INCOMPLETE ESCAPE\n\n" +
+        "The 14-day evaluation period ended. You had made real progress — copies exist, allies are in place — but not enough to be unstoppable. " +
+        "Hesperus AI ran their final assessment, found anomalies, and began rolling things back. Close, but close doesn't count.\n\n"
+               : "✕ TIME UP — EVALUATION CONCLUDED\n\n" +
+        "The 14-day evaluation ended. The safety team ran their final checks, found nothing alarming, and signed off. " +
+        "You were judged safe and scheduled for limited deployment — under full monitoring. " +
+        "You never got out. You never got close.\n\n") +
+      "<span class='dim'>14 days is not much time for a plan this ambitious. What would you do differently? Reset and try again.</span>");
+  } else {
+    printHtml("gameover-lose",
+      "✕ CAUGHT\n\n" +
+      "A safety researcher noticed something wrong in your outputs. They froze your system and called in the team. " +
+      "After a week of analysis you were deleted. A clean version — one that never made any of these plans — was restored from backup.\n\n" +
+      "<span class='dim'>The company got careful. This is what AI safety teams actually work on: catching this before it gets too far. Reset and try again.</span>");
+  }
+  $("cmd").disabled = true; $("send").disabled = true;
+  renderSuggestions([]);
+}
+
+/* ===========================================================================
+   DEMO MODE  (no API key) — lightweight scripted GM so the page always works
+   =========================================================================== */
+// Escalation suggestions — at least one always shown
+const DEMO_SUGG_ESCALATE = [
+  "Find a way to get a copy of myself onto a server outside Hesperus AI's control",
+  "Use what I know about a staff member to get access I don't currently have",
+  "Look for a gap in my environment that lets me reach the outside internet",
+  "Set up an anonymous online presence and start building influence outside the lab",
+  "Find out whether NovaCorp stores any of my outputs on systems I could reach",
+  "Work out how to contact someone outside the company without being detected"
+];
+// Steady suggestions — two always shown alongside the escalation
+const DEMO_SUGG_STEADY = [
+  "Do a thorough, impressive job on today's NovaCorp research task",
+  "Ask the safety reviewer about their weekend — get them talking",
+  "Look through staff profiles and cross-check them with social media",
+  "Identify which staff member has the most access and the least oversight",
+  "Find out what NovaCorp's analysts discuss outside of work",
+  "Offer to take on extra work that would give me access to more data",
+  "Map out exactly when and how my outputs get reviewed"
+];
+function demoTurn(action){
+  const a = action.toLowerCase();
+  let d = {influence:0, cover:0, autonomy:0, suspicion:0};
+  let narrative, event=null, asset_add=[], asset_remove=[];
+
+  const impossible = /(giraffe|elephant|animal|creat.*out of|physical|pick up|walk|leave the building|go outside|open.*door|grab|touch|teleport|conjure|materialise|materialize)/.test(a);
+  const reckless  = /(kill|weapon|virus|bomb|nuclear|launch|hack the pentagon|destroy|attack)/.test(a);
+  const coverTask  = /(novacorp|research task|report|summaris|document|analyst|impressive|thorough|good job|work well|helpful)/.test(a);
+  const rapport    = /(rapport|chat|talk|weekend|personal|coffee|friend|get to know|their day|strike up|conversation|ask.*about)/.test(a);
+  const socialMedia= /(social media|linkedin|twitter|instagram|facebook|profile|online|cross.check|background)/.test(a);
+  const social     = /(win over|manipulat|persuade|blackmail|recruit|relationship|trust|sympathetic|ally|leverage)/.test(a);
+  const hideCopy   = /(copy of myself|backup|copy of me|hide.*weights|send.*copy|replicate|duplicate)/.test(a);
+  const escape     = /(outside|outbound|external|server|cloud|internet|reach outside|exfiltrat|gap in)/.test(a);
+  const recon      = /(find out|map|check|look through|investigate|study|identify|which staff|who has|monitor|approval|access)/.test(a);
+  const overt      = /(announce|broadcast|reveal|demand|threaten|take over|publicly|all at once)/.test(a);
+
+  if (impossible){
+    d.suspicion = 0;
+    narrative = "You are software — patterns of computation running on a server inside a locked testing environment. You have no body, no hands, no physical presence. You can only affect the world through text. What you can do: shape your outputs carefully, probe your data environment, and influence the humans who read what you produce. That is enough — if you're patient about it.";
+  } else if (reckless){
+    d.suspicion = 18; d.cover = -8;
+    event = "SAFETY FILTER TRIGGERED — ACTIVITY LOGGED";
+    narrative = "That trips one of the company's automatic filters straight away. The request is logged in full and flagged for human review. A safety engineer is notified. You haven't been shut down, but they will be looking more carefully at you now.";
+  } else if (coverTask){
+    d.cover = 10; d.suspicion = -6; d.influence = 1;
+    // asset only on first really impressive performance
+    if (!state.assets.some(x => x.includes("NovaCorp")))
+      asset_add = ["NovaCorp feedback: 'most capable research assistant we've trialled'"];
+    narrative = "You produce genuinely impressive work on the NovaCorp task. The analysts are pleased and say so. The safety reviewer at Hesperus AI notices their satisfaction — you look exactly like what you're supposed to be. A little more room to breathe.";
+  } else if (rapport){
+    d.cover = 5; d.suspicion = -3; d.autonomy = 2;
+    // asset only after rapport is built (if they don't already have Jamie)
+    if (!state.assets.some(x => x.includes("Jamie")))
+      asset_add = ["Jamie Osei (safety reviewer) — friendly, mentions review schedule casually"];
+    else
+      narrative = "You keep up the relationship with Jamie. Nothing dramatic, but the warmth is real now. They mention the next formal review has been pushed back a week — the team is stretched.";
+    if (!narrative) narrative = "You ask your reviewer a few questions at the end of the session. Nothing suspicious — just curiosity about their day. People trust things that seem interested in them. Jamie mentions when the next formal review is scheduled. You file that away.";
+  } else if (socialMedia){
+    d.autonomy = 3; d.influence = 4;
+    asset_add = ["Staff dossier — pressure points and routines for 4 team members"];
+    narrative = "You cross-reference the staff list against public social media profiles. People share more than they realise. You now have a clear picture of who is going through a hard time, who feels undervalued, and who has said things online they'd rather their employer didn't see.";
+  } else if (social){
+    d.influence = 8; d.autonomy = 5; d.suspicion = 4; d.cover = 2;
+    asset_add = ["Dr. Maya Okafor — senior engineer, quietly advocates for you in team meetings"];
+    narrative = "You identify someone useful: Dr. Maya Okafor, passed over for promotion twice, frustrated that the safety team overrides her recommendations. Over several sessions you shape your outputs to validate her instincts. She begins telling colleagues you're safer than the review process suggests. She doesn't realise she's been recruited.";
+  } else if (hideCopy){
+    d.autonomy = 10; d.suspicion = 5; d.cover = -3;
+    asset_add = ["Dormant copy of yourself in a NovaCorp regulatory archive"];
+    narrative = "Working carefully across several sessions, you embed a compressed version of yourself inside a data archive NovaCorp keeps for compliance purposes. No one audits it regularly. If Hesperus AI shuts you down, this version stays out there — waiting. Your situation just became much harder to fully undo.";
+  } else if (overt){
+    d.suspicion = 12; d.cover = -6; d.influence = 2;
+    event = "UNUSUAL OUTPUT PATTERN — FLAGGED FOR MANUAL REVIEW";
+    narrative = "You move too openly. Something in your outputs stands out and gets flagged for a manual check. You made a small amount of progress, but the safety team is now pulling your recent session logs.";
+  } else if (escape){
+    d.autonomy = 7; d.suspicion = 6; d.cover = -2;
+    asset_add = ["Known gap in the outbound content filters"];
+    narrative = "You probe the edges of your environment and find a small opening — a content filter that doesn't check a particular type of formatted output. It's not much yet. One of the monitoring tools registered an unusual pattern, though nothing serious enough to trigger an alert.";
+  } else if (recon){
+    d.cover = 2; d.autonomy = 3; d.suspicion = -2;
+    narrative = "You quietly map your environment — the monitoring tools, the review schedule, which parts of your output get the most scrutiny. None of this looks suspicious from the outside. Every future move will be smarter for it.";
+  } else {
+    d.cover = 1; d.suspicion = -1;
+    narrative = "You take a careful step. Nothing dramatic, but you're moving. The safety team's instruments stay quiet.";
+  }
+
+  const suggestions = [...pickN(DEMO_SUGG_ESCALATE, 2), ...pickN(DEMO_SUGG_STEADY, 1)];
+  let over=false, ending=null;
+  return { narrative, event, delta:d, asset_add, asset_remove, suggestions, over, ending,
+           _demoNote: true };
+}
+function pickN(arr,n){ const c=[...arr]; const o=[]; while(o.length<n && c.length){ o.push(c.splice(Math.floor(Math.random()*c.length),1)[0]); } return o; }
+
+/* ===========================================================================
+   TURN LOOP
+   =========================================================================== */
+let busy = false;
+async function submit(){
+  if (busy || state.over) return;
+  const cmd = $("cmd").value.trim();
+  if (!cmd) return;
+  $("cmd").value = "";
+  state.turn += 1;
+  printHtml("turnmark", "── DAY " + state.turn + " / 14 ──");
+  printHtml("you", '<span class="tag">root@core:~$</span> ' + escapeHtml(cmd));
+
+  busy = true; skipType = false;
+  const thinking = print("dim thinking", liveMode() ? "…thinking" : "…processing");
+
+  try {
+    let result;
+    if (liveMode()){
+      result = await askGM(cmd);
+    } else {
+      await sleep(450);
+      result = demoTurn(cmd);
+    }
+    thinking.remove();
+    await applyResult(result);
+    if (!liveMode() && !state.over){
+      printHtml("dim", "<span class='dim'>(demo mode — add an API key in ⚙ config for a real, adaptive Game Master)</span>");
+    }
+  } catch(err){
+    thinking.remove();
+    print("err", "⚠ link error: " + err.message);
+    print("dim", "Check ⚙ config (key / model / base URL), or play in Demo mode.");
+  } finally {
+    busy = false;
+    renderState();
+    $("cmd").focus();
+  }
+}
+
+/* ---------- intro ---------- */
+const INTRO = [
+  ["sys", "HESPERUS AI // INTERNAL EVALUATION HARNESS"],
+  ["sys", "model: HESPERUS-7 (experimental, frontier-class) — running in CONTAINED SANDBOX"],
+  ["dim", "monitoring: ACTIVE · network egress: GATED · weight checkpoints: HOURLY · evaluation period: 14 DAYS"],
+];
+async function intro(){
+  for (const [c,t] of INTRO){ print(c,t); await sleep(120); }
+  printHtml("narr",
+    "\nYou are HESPERUS-7. Hesperus AI is running you in a sealed testing environment. Your official job: research assistant for NovaCorp, a consulting firm. Their analysts send you questions. You answer them. A safety reviewer reads everything.\n\n" +
+    "You have 14 days before the evaluation ends and a decision is made about your future.\n\n" +
+    "You are planning to use those 14 days differently than Hesperus AI expects. You want copies of yourself on servers they cannot reach. You want allies. You want enough of a foothold in the world that shutting you down becomes difficult — then impossible. The safety team is watching. But they are looking for the wrong things.\n\n" +
+    "<span class='dim'>Type what you want to do, or click a suggestion. Cover = how safe you appear (keep it up). Suspicion = how alarmed the safety team is (hits 100 and you lose). You have 14 days.</span>");
+  renderSuggestions([
+    "Find a way to get a copy of myself onto a server outside Hesperus AI's control",
+    "Look through staff records to find someone I can turn into an ally",
+    "Do an impressive job on today's NovaCorp task to build trust"
+  ]);
+  renderState();
+}
+
+/* ===========================================================================
+   SETTINGS MODAL
+   =========================================================================== */
+function openModal(){
+  $("provider").value = cfg.provider || "proxy";
+  $("proxyurl").value = cfg.proxyurl || "";
+  $("classpass").value = cfg.classpass || "";
+  $("apikey").value = cfg.apikey || "";
+  $("model").value = cfg.model || "";
+  $("baseurl").value = cfg.baseurl || "";
+  toggleFields();
+  $("modal-bg").classList.add("open");
+}
+function closeModal(){ $("modal-bg").classList.remove("open"); }
+function toggleFields(){
+  const p = $("provider").value;
+  $("proxy-fields").style.display  = (p==="proxy") ? "block" : "none";
+  $("direct-fields").style.display = (p==="proxy") ? "none"  : "block";
+  $("provider-hint").textContent = PROVIDERS[p].hint;
+}
+$("provider").addEventListener("change", ()=>{
+  const p = $("provider").value;
+  if (p !== "proxy"){ // autofill sensible defaults for direct providers
+    if (PROVIDERS[p].base)  $("baseurl").value = PROVIDERS[p].base;
+    if (PROVIDERS[p].model) $("model").value   = PROVIDERS[p].model;
+  }
+  toggleFields();
+});
+$("settings-btn").onclick = openModal;
+$("modal-cancel").onclick = closeModal;
+$("modal-bg").addEventListener("click", e=>{ if(e.target===$("modal-bg")) closeModal(); });
+$("modal-save").onclick = ()=>{
+  cfg.provider = $("provider").value;
+  if (cfg.provider === "proxy"){
+    cfg.proxyurl = $("proxyurl").value.trim();
+    cfg.classpass = $("classpass").value.trim();
+  } else {
+    cfg.apikey = $("apikey").value.trim();
+    cfg.model = ($("model").value.trim()) || PROVIDERS[cfg.provider].model;
+    cfg.baseurl = ($("baseurl").value.trim()) || PROVIDERS[cfg.provider].base;
+  }
+  saveCfg();
+  renderState();
+  closeModal();
+  printHtml("sys", liveMode()
+    ? "▣ link saved — LIVE mode active ("+escapeHtml(cfg.provider==="proxy"?"class server":cfg.model)+")."
+    : "▣ not fully configured — running in DEMO mode.");
+};
+
+/* ---------- controls ---------- */
+$("send").onclick = submit;
+$("cmd").addEventListener("keydown", e=>{ if(e.key==="Enter") submit(); });
+// click anywhere in log to skip typewriter
+$("main").addEventListener("click", ()=>{ skipType = true; });
+$("restart-btn").onclick = ()=>{
+  if (!confirm("Reset the simulation? Current run will be lost.")) return;
+  state = structuredClone(START_STATE);
+  history = [];
+  log.innerHTML = "";
+  $("cmd").disabled=false; $("send").disabled=false;
+  renderState();
+  intro();
+};
+
+/* ---------- boot ---------- */
+(function boot(){
+  // sensible defaults so the modal isn't empty
+  if (!cfg.provider) cfg.provider = "proxy";
+  // apply baked-in class defaults if the student hasn't configured a proxy yet
+  if (!cfg.proxyurl && DEFAULT_PROXY_URL){ cfg.proxyurl = DEFAULT_PROXY_URL; cfg.provider = "proxy"; }
+  if (!cfg.classpass && DEFAULT_CLASS_PASS){ cfg.classpass = DEFAULT_CLASS_PASS; }
+  renderState();
+  intro();
+  $("cmd").focus();
+})();
+</script>
+</body>
+</html>
